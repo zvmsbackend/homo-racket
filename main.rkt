@@ -1,6 +1,6 @@
 #lang racket
 
-(require racket/generator)
+(provide (all-defined-out))
 
 (define (cons-ints a b)
   (+ (* a 10) b))
@@ -88,27 +88,28 @@
                       #:when (char-numeric? c))
              (bitwise-xor (char->integer c) 48))))
 
-(define digest (make-parameter #f))
-(define-values (target source)
-  (command-line
-   #:once-each
-   [("-d" "--digest") "" (digest #t)]
-   #:args (target [source "114514"])
-   (values (string->number target) (get-ints source))))
+(when (not (= (vector-length (current-command-line-arguments)) 0))
+  (define digest (make-parameter #f))
+  (define-values (target source)
+    (command-line
+     #:once-each
+     [("-d" "--digest") "" (digest #t)]
+     #:args (target [source "114514"])
+     (values (string->number target) (get-ints source))))
 
-(define past (current-milliseconds))
-(define now (make-parameter 0))
-(cond
-  [(digest)
-   (define result (prove source target))
-   (if result
-       (printf "~a = ~a\n" target (->infix source result))
-       (displayln "No result found."))
-   (now (current-milliseconds))]
-  [else
-   (define result (prove-all source target))
-   (define exprs (remove-duplicates (for/list ([r (in-stream result)]) (->infix source r))))
-   (now (current-milliseconds))
-   (displayln (string-join (map (curry format "~a = ~a" target) exprs) "\n"))
-   (printf "~a results found\n" (length exprs))])
-(printf "Fixed within ~a milliseconds\n" (- (now) past))
+  (define past (current-milliseconds))
+  (define now (make-parameter 0))
+  (cond
+    [(digest)
+     (define result (prove source target))
+     (if result
+         (printf "~a = ~a\n" target (->infix source result))
+         (displayln "No result found."))
+     (now (current-milliseconds))]
+    [else
+     (define result (prove-all source target))
+     (define exprs (remove-duplicates (for/list ([r (in-stream result)]) (->infix source r))))
+     (now (current-milliseconds))
+     (displayln (string-join (map (curry format "~a = ~a" target) exprs) "\n"))
+     (printf "~a results found\n" (length exprs))])
+  (printf "Fixed within ~a milliseconds\n" (- (now) past)))
