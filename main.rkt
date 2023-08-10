@@ -8,7 +8,7 @@
 (define op->string #hash((+ . "+")
                          (- . "-")
                          (* . "*")
-                         (/ . "*")))
+                         (/ . "/")))
 
 (define op->proc (hash '+ +
                        '- -
@@ -57,7 +57,7 @@
                            return)])
           (match (vector source expr)
             [(vector (list* a source) (list* (? number? b) expr))
-             (stream-append (stream-lazy (loop source (cons (+ (* a 10) b) expr) op-count)) return)]
+             (stream-append (stream-lazy (loop source (cons (+ (* b 10) a) expr) op-count)) return)]
             [_ return])))))
 
 (define (prove source target)
@@ -67,9 +67,9 @@
       (stream-first result)))
 
 (define (get-ints s)
-  (reverse (for/list ([c s]
-                      #:when (char-numeric? c))
-             (bitwise-xor (char->integer c) 48))))
+  (for/list ([c s]
+             #:when (char-numeric? c))
+    (bitwise-xor (char->integer c) 48)))
 
 (when (not (= (vector-length (current-command-line-arguments)) 0))
   (define digest (make-parameter #f))
