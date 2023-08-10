@@ -2,80 +2,63 @@
 
 (provide (all-defined-out))
 
-(define (cons-ints a b)
-  (+ (* a 10) b))
-
 (define (safe-div a b)
   (if (= b 0) +nan.f (/ a b)))
 
-(define op->string (hash '+ "+"
-                         '- "-"
-                         '* "*"
-                         '/ "/"
-                         'cons ""))
+(define op->string #hash((+ . "+")
+                         (- . "-")
+                         (* . "*")
+                         (/ . "*")))
 
 (define op->proc (hash '+ +
                        '- -
                        '* *
-                       '/ safe-div
-                       'cons cons-ints))
+                       '/ safe-div))
 
-(define op-precedence (hash '+ 1 '- 1
-                            '* 2 '/ 2
-                            'cons 3))
+(define op-precedence #hash((+ . 1) (- . 1) (* . 2) (/ . 2)))
 
-(define (compute source op-stack)
-  (let loop ([op-stack op-stack] [compute-stack null] [source-stack source])
-    (match (vector op-stack compute-stack source-stack)
-      [(vector (list) (list* peek _) _) peek]
-      [(vector (list* 'push op-stack) _ (list* item source-stack))
-       (loop op-stack (cons item compute-stack) source-stack)]
-      [(vector (list* op op-stack) (list* x y compute-stack) _)
-       (loop op-stack (cons ((hash-ref op->proc op) x y) compute-stack) source-stack)])))
+(define (compute expr)
+  (let loop ([expr expr] [compute-stack null])
+    (match (vector expr compute-stack)
+      [(vector '() (list return)) return]
+      [(vector _ (list* (? number? a) (? number? b) (? symbol? op) compute-stack))
+       (loop expr (cons ((hash-ref op->proc op) a b) compute-stack))]
+      [(vector (list* item expr) _)
+       (loop expr (cons item compute-stack))])))
 
-(define (->infix source op-stack)
-  (let loop ([op-stack op-stack] [compute-stack null] [source-stack source])
-    (match (vector op-stack compute-stack source-stack)
-      [(vector (list) (list* (cons content _) _) _) content]
-      [(vector (list* 'push op-stack) _ (list* item source-stack))
-       (loop op-stack (cons (cons (number->string item) 4) compute-stack) source-stack)]
-      [(vector (list* op op-stack) (list* (cons content1 pr1) (cons content2 pr2) compute-stack) _)
+(define (->infix expr)
+  (let loop ([expr expr] [compute-stack null])
+    (match (vector expr compute-stack)
+      [(vector '() (list (cons return _))) return]
+      [(vector _ (list* (cons contentl prl) (cons contentr prr) op compute-stack))
        (define prm (hash-ref op-precedence op))
-       (define symbol (hash-ref op->string op))
-       (define formatter (match (cons (< pr1 prm) (or (< pr2 prm) (and (= pr2 prm) (or (eq? op '-) (eq? op '/)))))
+       (define formatter (match (cons (< prl prm) (or (< prr prm) (and (= prr prm) (or (eq? op '-) (eq? op '/)))))
                            [(cons #f #f) "~a~a~a"]
                            [(cons #t #f) "(~a)~a~a"]
                            [(cons #f #t) "~a~a(~a)"]
                            [(cons #t #t) "(~a)~a(~a)"]))
-       (loop op-stack (cons (cons (format formatter content1 symbol content2) prm) compute-stack) source-stack)])))
+       (loop expr (cons (cons (format formatter contentl (hash-ref op->string op) contentr) prm) compute-stack))]
+      [(vector (list* item expr) _)
+       (loop expr (cons (if (symbol? item) item (cons item 4)) compute-stack))])))
 
 (define (prove-all source target)
-  (define len (- (* (length source) 2) 1))
-  (let loop ([a 0] [b 0] [op-stack null])
-    (cond
-      [(= (+ a b) len)
-       (let* ([op-stack (reverse op-stack)]
-              [result (compute source op-stack)])
-         (if (= result target)
-             (stream op-stack)
-             empty-stream))]
-      [else
-       (let* ([return (if (<= a (/ len 2))
-                          (stream-lazy (loop (+ a 1) b (cons 'push op-stack)))
-                          empty-stream)]
-              [return (if (> a (+ b 1))
-                          (for/fold ([return return])
-                                    ([op (in-list '(+ - * /))])
-                            (stream-append (stream-lazy (loop a (+ b 1) (cons op op-stack))) return))
-                          return)]
-              [return (for/fold ([return return])
-                                ([i (in-naturals)]
-                                 #:break (or (> (+ a i 1) (quotient len 2)) (< a (- b 2))))
-                        (stream-append (stream-lazy (loop (+ a i 2) (+ b i 1)
-                                                          (append (build-list (+ i 1) (lambda (i) 'cons))
-                                                                  (build-list (+ i 2) (lambda (i) 'push))
-                                                                  op-stack))) return))])
-         return)])))
+  (let loop ([source source] [expr null] [op-count 0])
+    (if (and (null? source) (= op-count 1))
+        (if (= (compute expr) target)
+            (stream expr)
+            empty-stream)
+        (let* ([return (if (null? source)
+                           empty-stream
+                           (stream-lazy (loop (cdr source) (cons (car source) expr) (+ op-count 1))))]
+               [return (if (> op-count 1)
+                           (for/fold ([return return])
+                                     ([op (in-list '(+ - * /))])
+                             (stream-append (stream-lazy (loop source (cons op expr) (- op-count 1))) return))
+                           return)])
+          (match (vector source expr)
+            [(vector (list* a source) (list* (? number? b) expr))
+             (stream-append (stream-lazy (loop source (cons (+ (* a 10) b) expr) op-count)) return)]
+            [_ return])))))
 
 (define (prove source target)
   (define result (prove-all source target))
@@ -103,12 +86,12 @@
     [(digest)
      (define result (prove source target))
      (if result
-         (printf "~a = ~a\n" target (->infix source result))
+         (printf "~a = ~a\n" target (->infix result))
          (displayln "No result found."))
      (now (current-milliseconds))]
     [else
      (define result (prove-all source target))
-     (define exprs (remove-duplicates (for/list ([r (in-stream result)]) (->infix source r))))
+     (define exprs (remove-duplicates (for/list ([r (in-stream result)]) (->infix r))))
      (now (current-milliseconds))
      (displayln (string-join (map (curry format "~a = ~a" target) exprs) "\n"))
      (printf "~a results found\n" (length exprs))])
